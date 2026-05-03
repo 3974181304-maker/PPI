@@ -6,7 +6,7 @@ import pandas as pd
 import torch.nn as nn
 import matplotlib
 
-# 一定要放在 import pyplot 之前
+
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
@@ -14,9 +14,7 @@ from tqdm import tqdm
 from torch.func import stack_module_state, vmap, functional_call, grad
 
 
-# =========================
-# 0. 固定随机种子
-# =========================
+
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -27,9 +25,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 
-# =========================
-# 1. 模型定义
-# =========================
+
 class MLP(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
@@ -45,9 +41,7 @@ class MLP(nn.Module):
         return self.net(x).squeeze(-1)   # 输出 (batch,)
 
 
-# =========================
-# 2. 数据生成
-# =========================
+
 def generate_data(n, d, dist_type='normal', device='cpu'):
     if dist_type == 'normal':
         X = torch.randn(n, d, device=device)
@@ -70,32 +64,30 @@ def generate_data(n, d, dist_type='normal', device='cpu'):
     return X, Y_raw
 
 
-# =========================
-# 3. 核心实验：vmap 并行训练 M 个模型
-# =========================
+
 def run_parallel_experiment(
     X_train, Y_train, X_L, Y_L, X_U,
     d, batch_size, T, eta, M_runs, device
 ):
     N = X_train.size(0)
 
-    # 一组独立初始化的模型
+
     models = [MLP(d).to(device) for _ in range(M_runs)]
     base_model = MLP(d).to(device)
 
-    # 把 M 个模型的参数/缓冲区堆叠起来
+
     params, buffers = stack_module_state(models)
 
     def compute_loss(params, buffers, x, y):
         pred = functional_call(base_model, (params, buffers), x)
         return torch.nn.functional.mse_loss(pred, y)
 
-    # 对 M 个模型同时求梯度
+
     ft_compute_grad = vmap(grad(compute_loss), in_dims=(0, 0, 0, 0))
 
-    # 训练
+
     for step in range(T):
-        # 给每个模型生成不同 shuffle
+ 
         perms = torch.rand((M_runs, N), device=device).argsort(dim=1)
 
         for start_idx in range(0, N, batch_size):
@@ -107,19 +99,19 @@ def run_parallel_experiment(
 
             grads = ft_compute_grad(params, buffers, batch_X, batch_y)
 
-            # 纯 SGD 更新
+
             with torch.no_grad():
                 for name in params.keys():
                     params[name].sub_(eta * grads[name])
 
-    # 推断
+
     def predict(params, buffers, x):
         return functional_call(base_model, (params, buffers), x)
 
     all_preds_L = vmap(predict, in_dims=(0, 0, None))(params, buffers, X_L)  # (M_runs, n_l)
     all_preds_U = vmap(predict, in_dims=(0, 0, None))(params, buffers, X_U)  # (M_runs, n_u)
 
-    # PPI 统计量（保持你原来的逻辑：用 Y_L 做中心化后检验 0）
+
     Delta = Y_L.unsqueeze(0) - all_preds_L
     theta_PPI_hat = torch.mean(Delta, dim=1) + torch.mean(all_preds_U, dim=1)
     sigma_sq_Delta_hat = torch.var(Delta, dim=1, unbiased=True)
@@ -131,9 +123,7 @@ def run_parallel_experiment(
     return reject.float().mean().item()
 
 
-# =========================
-# 4. 主函数
-# =========================
+
 def main():
     set_seed(42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -158,12 +148,10 @@ def main():
     for dist in distributions:
         print(f"\n---> Current data distribution: {dist.upper()}")
 
-        # 数据只生成一次，和你原来的第一个实验一致
         X_train, Y_train_raw = generate_data(n_t, d, dist, device)
         X_L, Y_L_raw = generate_data(n_l, d, dist, device)
         X_U, _ = generate_data(N_u, d, dist, device)
 
-        # 保持你原来的中心化逻辑
         Y_L_mean = Y_L_raw.mean()
         Y_train = Y_train_raw - Y_L_mean
         Y_L = Y_L_raw - Y_L_mean
@@ -191,17 +179,13 @@ def main():
 
             print(f"Batch Size: {B:4d} | Rejection Rate: {rejection_rate:.4f}")
 
-    # =========================
-    # 5. 保存结果
-    # =========================
+
     df_results = pd.DataFrame(criterion_results)
     csv_path = "results/ppi_sgd_parallel_results.csv"
     df_results.to_csv(csv_path, index=False)
     print(f"\nThe experimental data has been saved to: {csv_path}")
 
-    # =========================
-    # 6. 绘图
-    # =========================
+
     plt.figure(figsize=(10, 6))
 
     for dist in distributions:
