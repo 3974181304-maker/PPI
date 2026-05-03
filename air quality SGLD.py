@@ -6,12 +6,10 @@ import pandas as pd
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-import matplotlib.pyplot as plt  # 新增：用于绘图
+import matplotlib.pyplot as plt  
 import matplotlib
-# 强制使用 TkAgg 后端，这样会弹出独立窗口
 matplotlib.use('TkAgg')
 
-# --- 模型定义 ---
 class AirQualityMLP(nn.Module):
     def __init__(self, input_dim: int):
         super().__init__()
@@ -27,7 +25,6 @@ class AirQualityMLP(nn.Module):
         return self.net(x).squeeze(-1)
 
 
-# --- 数据准备 ---
 def load_and_prepare_data(csv_path='AirQualityUCI.csv', test_size=0.5, random_state=54):
     try:
         df = pd.read_csv(csv_path, sep=';', decimal=',')
@@ -54,7 +51,6 @@ def load_and_prepare_data(csv_path='AirQualityUCI.csv', test_size=0.5, random_st
     return X_train, y_train, X_test_pool, y_test_pool, true_mu
 
 
-# --- 核心实验函数 (独立Batch的完全并行) ---
 def run_parallel_experiment(sigma_list, K_splits, M_runs, epochs, batch_size, lr,
                             X_train, y_train, X_test_pool, y_test_pool, n_labeled, n_unlabeled, true_mu):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -140,8 +136,8 @@ def main():
         sigma_list=sigma_list,
         K_splits=1,
         M_runs=200,
-        epochs=20,
-        batch_size=64,
+        epochs=20，
+        batch_size=64，
         lr=0.01,
         X_train=X_train,
         y_train=y_train,
@@ -152,35 +148,32 @@ def main():
         true_mu=true_mu
     )
 
-    # --- 结果打印 ---
+
     print("\n" + "=" * 30)
     print("FINAL SUMMARY RESULTS")
     print("=" * 30)
     for sigma, rate in results:
         print(f"Sigma: {sigma:.1f} | Rejection Rate: {rate:.4f}")
 
-    # --- 新增：绘图逻辑 ---
+
     sigmas = [res[0] for res in results]
     rates = [res[1] for res in results]
 
     plt.figure(figsize=(8, 5))
     plt.plot(sigmas, rates, marker='o', linestyle='-', color='g', linewidth=2, markersize=8)
 
-    # 装饰图表
+
     plt.title('Rejection Rate vs. Sigma (Gradient Noise)', fontsize=14)
     plt.xlabel('Sigma (Noise Level)', fontsize=12)
     plt.ylabel('Rejection Rate', fontsize=12)
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.ylim(-0.05, 0.5)  # 拒绝率通常在 0 到 1 之间
 
-    # 在点上标注数值
 
-    # 保存图片
     save_path = 'ppi_rejection_rate.png'
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"\n=> 实验图表已保存为: {save_path}")
 
-    # 展示（如果在支持 GUI 的环境下运行）
     plt.show()
 
 
