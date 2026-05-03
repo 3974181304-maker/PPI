@@ -8,7 +8,6 @@ import seaborn as sns
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 import matplotlib
-# 强制使用 TkAgg 后端，这样会弹出独立窗口
 matplotlib.use('TkAgg')
 
 def set_seed(seed=42):
@@ -99,7 +98,6 @@ def main():
     set_seed(42)
     
     os.makedirs("results", exist_ok=True)
-#参数修改过
     n_l = 20          # labeled data size
     N_u = 200         # unlabeled data size
     n_t = 1000         # train data size
