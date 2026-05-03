@@ -9,11 +9,9 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import matplotlib
 
-# 强制使用 TkAgg 后端
 matplotlib.use('TkAgg')
 
 
-# --- 模型定义 ---
 class AirQualityMLP(nn.Module):
     def __init__(self, input_dim: int):
         super().__init__()
@@ -29,7 +27,6 @@ class AirQualityMLP(nn.Module):
         return self.net(x).squeeze(-1)
 
 
-# --- 数据准备 (与原代码相同) ---
 def load_and_prepare_data(csv_path='AirQualityUCI.csv', test_size=0.5, random_state=64):
     try:
         df = pd.read_csv(csv_path, sep=';', decimal=',')
@@ -56,7 +53,6 @@ def load_and_prepare_data(csv_path='AirQualityUCI.csv', test_size=0.5, random_st
     return X_train, y_train, X_test_pool, y_test_pool, true_mu
 
 
-# --- 核心实验函数 (基于纯SGD，测试Batch Size的影响) ---
 def run_parallel_experiment(batch_size_list, K_splits, M_runs, epochs, lr,
                             X_train, y_train, X_test_pool, y_test_pool, n_labeled, n_unlabeled, true_mu):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -68,7 +64,6 @@ def run_parallel_experiment(batch_size_list, K_splits, M_runs, epochs, lr,
     N = len(X_train_t)
     results = []
 
-    # 现在的自变量变成了 batch_size
     for batch_size in batch_size_list:
         print(f"\n--- Testing Batch Size: {batch_size} (Vectorized M={M_runs}) ---")
         num_batches = N // batch_size
@@ -92,7 +87,6 @@ def run_parallel_experiment(batch_size_list, K_splits, M_runs, epochs, lr,
             ft_compute_grad = vmap(grad(compute_loss), in_dims=(0, 0, 0, 0))
 
             for epoch in range(epochs):
-                # 核心：给 M 个模型生成不同的 shuffle 索引 (这就是引起模型差异的唯一根源)
                 perms = torch.rand((M_runs, N), device=device).argsort(dim=1)
 
                 for i in range(num_batches):
@@ -102,11 +96,10 @@ def run_parallel_experiment(batch_size_list, K_splits, M_runs, epochs, lr,
 
                     grads = ft_compute_grad(params, buffers, batch_X, batch_y)
 
-                    # 纯 SGD 更新，不再注入 Gaussian noise
                     with torch.no_grad():
                         for name, param in params.items():
                             g = grads[name]
-                            param.sub_(g * lr)  # 仅仅使用真实的 mini-batch 梯度
+                            param.sub_(g * lr)  
 
             def predict(params, buffers, x):
                 return functional_call(base_model, (params, buffers), x)
@@ -140,15 +133,14 @@ def run_parallel_experiment(batch_size_list, K_splits, M_runs, epochs, lr,
 def main():
     X_train, y_train, X_test_pool, y_test_pool, true_mu = load_and_prepare_data()
 
-    # 将 sigma_list 替换为 batch_size_list
-    # batch size 越小，由不同的 mini-batch 带来的模型方差越大
+
     batch_sizes = [16, 32, 64, 128, 256, 512, 1024, len(X_train)]
 
     results = run_parallel_experiment(
         batch_size_list=batch_sizes,
         K_splits=1,
         M_runs=300,
-        epochs=30,  # 可适当增加 epoch 保证收敛
+        epochs=30,  
         lr=0.5,
         X_train=X_train,
         y_train=y_train,
@@ -159,35 +151,30 @@ def main():
         true_mu=true_mu
     )
 
-    # --- 结果打印 ---
     print("\n" + "=" * 30)
     print("FINAL SUMMARY RESULTS (Pure SGD)")
     print("=" * 30)
     for bs, rate in results:
         print(f"Batch Size: {bs:4d} | Rejection Rate: {rate:.4f}")
 
-    # --- 绘图逻辑 ---
     bs_list = [res[0] for res in results]
     rates = [res[1] for res in results]
 
     plt.figure(figsize=(8, 5))
     plt.plot(bs_list, rates, marker='s', linestyle='-', color='b', linewidth=2, markersize=8)
 
-    # 为了更直观地展示 batch_size 的变化，X轴可以考虑使用对数刻度或反比例刻度
     plt.xscale('log', base=2)
 
     plt.title('Rejection Rate vs. Batch Size (Pure SGD Noise)', fontsize=14)
     plt.xlabel('Batch Size (Log Scale)', fontsize=12)
     plt.ylabel('Rejection Rate', fontsize=12)
 
-    # 绘制显著性基准线 (通常是 0.05)
-    plt.axhline(y=0.05, color='r', linestyle='--', label='Target Alpha (0.05)')
+
 
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.7)
-    plt.ylim(-0.05, max(max(rates) * 1.2, 0.2))  # 根据实际结果自适应Y轴
+    plt.ylim(-0.05, max(max(rates) * 1.2, 0.2)) 
 
-    # 保存图片
     save_path = 'ppi_rejection_rate_sgd.png'
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     print(f"\n=> 实验图表已保存为: {save_path}")
