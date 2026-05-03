@@ -7,7 +7,6 @@ import pandas as pd
 import torch.nn as nn
 import matplotlib
 
-# 一定要放在 import pyplot 之前
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
@@ -15,9 +14,7 @@ from tqdm import tqdm
 from torch.func import stack_module_state, vmap, functional_call, grad
 
 
-# =========================
-# 0. 固定随机种子
-# =========================
+
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -28,9 +25,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 
-# =========================
-# 1. 模型定义
-# =========================
+
 class MLP(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
@@ -46,9 +41,7 @@ class MLP(nn.Module):
         return self.net(x).squeeze(-1)   # (batch,)
 
 
-# =========================
-# 2. 数据生成
-# =========================
+
 def generate_data(n, d, dist_type='normal', device='cpu'):
     if dist_type == 'normal':
         X = torch.randn(n, d, device=device)
@@ -71,10 +64,7 @@ def generate_data(n, d, dist_type='normal', device='cpu'):
 
 
 def true_theta(dist_type, d):
-    """
-    这里返回 E[Y] 的真实值，用于构造正确的原假设。
-    因为噪声均值为 0，所以只需要算 E[h(X)]。
-    """
+
     if dist_type == 'normal':
         ex2 = 1.0              # E[X^2], X ~ N(0,1)
         esin = 0.0             # E[sin(X)] by symmetry
@@ -93,30 +83,24 @@ def true_theta(dist_type, d):
         return ex2
 
 
-# =========================
-# 3. 核心实验：vmap 并行训练 M 个模型
-# =========================
+
 def run_parallel_experiment(
     X_train, Y_train, X_L, Y_L, X_U,
     d, batch_size, T, eta, M_runs, device, theta0
 ):
     N = X_train.size(0)
 
-    # 一组独立初始化的模型
     models = [MLP(d).to(device) for _ in range(M_runs)]
     base_model = MLP(d).to(device)
 
-    # 堆叠参数
     params, buffers = stack_module_state(models)
 
     def compute_loss(params, buffers, x, y):
         pred = functional_call(base_model, (params, buffers), x)
         return torch.nn.functional.mse_loss(pred, y)
 
-    # 对 M 个模型同时求梯度
     ft_compute_grad = vmap(grad(compute_loss), in_dims=(0, 0, 0, 0))
 
-    # 训练：T 个 epoch
     for epoch in range(T):
         perms = torch.rand((M_runs, N), device=device).argsort(dim=1)
 
@@ -133,18 +117,15 @@ def run_parallel_experiment(
                 for name in params.keys():
                     params[name].sub_(eta * grads[name])
 
-    # 推断
     def predict(params, buffers, x):
         return functional_call(base_model, (params, buffers), x)
 
     all_preds_L = vmap(predict, in_dims=(0, 0, None))(params, buffers, X_L)  # (M_runs, n_l)
     all_preds_U = vmap(predict, in_dims=(0, 0, None))(params, buffers, X_U)  # (M_runs, n_u)
 
-    # 标准 PPI mean estimator（不做中心化）
     Delta = Y_L.unsqueeze(0) - all_preds_L
     theta_PPI_hat = torch.mean(Delta, dim=1) + torch.mean(all_preds_U, dim=1)
 
-    # 方差估计
     sigma_sq_Delta_hat = torch.var(Delta, dim=1, unbiased=True)
 
     n_l = X_L.shape[0]
@@ -154,9 +135,6 @@ def run_parallel_experiment(
     return reject.float().mean().item()
 
 
-# =========================
-# 4. 主函数
-# =========================
 def main():
     set_seed(52)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -181,12 +159,10 @@ def main():
     for dist in distributions:
         print(f"\n---> Current data distribution: {dist.upper()}")
 
-        # 数据只生成一次
         X_train, Y_train = generate_data(n_t, d, dist, device)
         X_L, Y_L = generate_data(n_l, d, dist, device)
         X_U, _ = generate_data(N_u, d, dist, device)
 
-        # 真实均值，用于检验 H0: theta = theta0
         theta0 = true_theta(dist, d)
         print(f"True theta0 = {theta0:.6f}")
 
@@ -214,17 +190,12 @@ def main():
 
             print(f"Batch Size: {B:4d} | Rejection Rate: {rejection_rate:.4f}")
 
-    # =========================
-    # 5. 保存结果
-    # =========================
+
     df_results = pd.DataFrame(criterion_results)
     csv_path = "results/ppi_sgd_parallel_results.csv"
     df_results.to_csv(csv_path, index=False)
     print(f"\nThe experimental data has been saved to: {csv_path}")
 
-    # =========================
-    # 6. 绘图
-    # =========================
     plt.figure(figsize=(10, 6))
 
     for dist in distributions:
